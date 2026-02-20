@@ -1,0 +1,131 @@
+import threading
+import queue
+import time
+
+class Vehicle(threading.Thread):
+    def __init__(self, vehicle_id, vehicle_type, lane, route, crossing_time):
+        threading.Thread.__init__(self)
+        self.vehicle_id = vehicle_id  
+        self.vehicle_type = vehicle_type  
+        self.lane = lane  
+        self.route = route  
+        self.crossing_time = crossing_time  
+
+    def run(self):
+        pass
+
+class TrafficManager:
+    def __init__(self, lane_weights):
+        self.lane_queues = {lane: queue.Queue() for lane in lane_weights.keys()}
+        self.lane_weights = lane_weights
+        self.lane_entry_locks = {lane: threading.Lock() for lane in lane_weights.keys()}
+        self.emergency_queue = queue.Queue()
+        
+        self.path_locks = {
+            "north_to_north": threading.Lock(),
+            "north_to_south": threading.Lock(),
+            "north_to_east": threading.Lock(),
+            "north_to_west": threading.Lock(),
+            "east_to_north": threading.Lock(),
+            "east_to_south": threading.Lock(),
+            "east_to_east": threading.Lock(),
+            "east_to_west": threading.Lock(),
+            "south_to_north": threading.Lock(),
+            "south_to_south": threading.Lock(),
+            "south_to_east": threading.Lock(),
+            "south_to_west": threading.Lock(),
+            "west_to_north": threading.Lock(),
+            "west_to_south": threading.Lock(),
+            "west_to_east": threading.Lock(),
+            "west_to_west": threading.Lock(),
+        }
+    
+    def get_lane_name(self, lane):
+        lane_names = {1: "north", 2: "east", 3: "west", 4: "south"}
+        return lane_names.get(lane, "unknown")
+
+    def get_lane_name2(self, route, vehicle):
+        lane = self.get_lane_name(vehicle.lane)
+
+        mapping = {
+            "north": {"right": "west", "left": "east", "straight": "south"},
+            "south": {"right": "east", "left": "west", "straight": "north"},
+            "east": {"right": "north", "left": "south", "straight": "west"},
+            "west": {"right": "south", "left": "north", "straight": "east"},
+        }
+
+        return mapping.get(lane, {}).get(route, "unknown")
+
+    def enter_intersection(self, vehicle):
+        destination = self.get_lane_name2(vehicle.route, vehicle)
+        path_lock_key = f"{self.get_lane_name(vehicle.lane)}_to_{destination}"
+    
+        if self.path_locks.get(path_lock_key):
+            with self.lane_entry_locks[vehicle.lane]:  # کنترل ورود از لاین
+                print(f"🚗 Vehicle {vehicle.vehicle_id} entering from {self.get_lane_name(vehicle.lane)} to {destination}")
+                with self.path_locks[path_lock_key]:  # فقط مسیر مقصد قفل شود
+                    time.sleep(vehicle.crossing_time)
+                    self.exit_intersection(vehicle)
+
+    def exit_intersection(self, vehicle):
+        print(f"🚗 Vehicle {vehicle.vehicle_id} exited.")
+        self.remove_vehicle_from_queue(vehicle)
+
+    def remove_vehicle_from_queue(self, vehicle):
+        if vehicle.vehicle_type == 'emergency':
+            temp_queue = queue.Queue()
+            while not self.emergency_queue.empty():
+                temp_vehicle = self.emergency_queue.get()
+                if temp_vehicle.vehicle_id != vehicle.vehicle_id:
+                    temp_queue.put(temp_vehicle)
+            self.emergency_queue = temp_queue
+        else:
+            temp_queue = queue.Queue()
+            while not self.lane_queues[vehicle.lane].empty():
+                temp_vehicle = self.lane_queues[vehicle.lane].get()
+                if temp_vehicle.vehicle_id != vehicle.vehicle_id:
+                    temp_queue.put(temp_vehicle)
+            self.lane_queues[vehicle.lane] = temp_queue
+
+    def process_vehicles(self):
+        while True:
+            for lane in [1, 3, 2, 4]:
+                start_time = time.time()
+                while time.time() - start_time < 0.012*lane_weights[lane]:  # زمان اختصاص داده شده
+                    vehicle = None
+                    if not self.emergency_queue.empty():
+                        vehicle = self.emergency_queue.get()
+                    elif not self.lane_queues[lane].empty():
+                        vehicle = self.lane_queues[lane].get()
+                    if vehicle:
+                        threading.Thread(target=self.enter_intersection, args=(vehicle,)).start()
+                time.sleep(0.001)
+
+    def add_vehicle(self, vehicle):
+        if vehicle.vehicle_type == 'emergency':
+            self.emergency_queue.put(vehicle)
+        else:
+            self.lane_queues[vehicle.lane].put(vehicle)
+
+if __name__ == "__main__":
+    lane_weights = {1: 3, 2: 2, 3: 1, 4: 4}
+    manager = TrafficManager(lane_weights)
+
+    vehicles = [
+        Vehicle(1, 'normal', 1, 'right', 5),
+        Vehicle(2, 'emergency', 1, 'straight', 5),
+        Vehicle(3, 'normal', 4, 'left', 3),
+        Vehicle(4, 'normal', 1, 'right', 5),
+        Vehicle(5, 'emergency', 3, 'straight', 11),
+        Vehicle(6, 'normal', 1, 'right', 5),
+        Vehicle(7, 'emergency', 1, 'straight', 5),
+        Vehicle(8, 'normal', 4, 'left', 3),
+        Vehicle(9, 'normal', 2, 'right', 5),
+        Vehicle(10, 'normal', 2, 'straight', 11)
+    ]
+    
+    for v in vehicles:
+        manager.add_vehicle(v)
+    
+    threading.Thread(target=manager.process_vehicles, daemon=True).start()
+    time.sleep(20)
